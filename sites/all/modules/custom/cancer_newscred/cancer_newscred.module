@@ -1,0 +1,434 @@
+<?php
+
+/**
+ * @file
+ * Code for the cancer_newscred.
+ */
+
+/**
+ * Implements hook_page_build().
+ */
+function cancer_newscred_page_build() {
+  if ($node = menu_get_object()) {
+    // Check if page is newscred article.
+    if ($node->type == 'newscred') {
+      $opts = ['type' => 'external', 'weight' => 999, 'group' => JS_THEME];
+      drupal_add_js('//analytics.newscred.com/analytics_eb2a9e4242be40bcbfc886e6f2478d23.js', $opts);
+    }
+  }
+}
+
+/**
+ * Implements hook_entity_presave().
+ */
+function cancer_newscred_entity_presave($entity, $type) {
+  // Do not generate new alias for content coming from JCR.
+  // Generate alias only for newscred content.
+  if (($type === 'node' && $entity->type !== 'newscred') || $type !== 'node') {
+    $entity->path['pathauto'] = FALSE;
+  }
+}
+
+/**
+ * Implements hook_feeds_presave().
+ */
+function cancer_newscred_feeds_presave(FeedsSource $source, $entity, $item) {
+  // To set the default language to English.
+  $entity->language = language_default('language');
+  // Check that this is fired only for the importer being used.
+  if ($source->importer->id === 'newscred') {
+    // Save external image in local.
+    if (isset($item['video_thumbnail']) && !empty($item['video_thumbnail']) && ($item['asset_type'] != 'Video Link')) {
+      $title = trim($item['title']);
+      $title = preg_replace('/[^A-Za-z0-9\-]/', ' ', $title);
+      $title = preg_replace('!\s+!', ' ', $title);
+      $img_title = strtolower(str_replace(' ', '-', $title));
+      $extention = substr($item['video_thumbnail'], (strrpos($item['video_thumbnail'], ".")));
+      $img_url = str_replace('https', 'http', $item['video_thumbnail']);
+      $external_image = file_get_contents($img_url);
+      $product_image_name = $img_title . '-' . time() . $extention;
+      $external_image_object = file_save_data($external_image, 'public://' . $product_image_name, FILE_EXISTS_REPLACE);
+      $external_image_path = $external_image_object->uri;
+      if (is_object($external_image_object)) {
+        $external_image_object->status = 1;
+        $file = file_save($external_image_object);
+        echo '<pre>';
+        print_r( $entity->field_video_thumbnail);
+        exit;
+
+        $entity->field_video_thumbnail[LANGUAGE_NONE][0]['value'] = $img_url;
+        if ($external_image_object->fid) {
+          $entity->field_newscred_image[LANGUAGE_NONE][0]['fid'] = $external_image_object->fid;
+        }
+      }
+    }
+
+    // Meta tags for no follow no index.
+    if (isset($item['no_index_no_follow']) && !empty(isset($item['no_index_no_follow']))) {
+      $robot_array = [];
+      $robot_array['value']['noindex'] = 'noindex';
+      $robot_array['value']['nofollow'] = 'nofollow';
+      $robot_array['value']['noarchive'] = 'noarchive';
+      $robot_array['value']['nosnippet'] = 'nosnippet';
+      $robot_array['value']['noodp'] = 'noodp';
+      $robot_array['value']['noydir'] = 'noydir';
+      $robot_array['value']['noimageindex'] = 'noimageindex';
+      $robot_array['value']['notranslate'] = 'notranslate';
+      // Save the meta tags.
+      $entity->metatags[LANGUAGE_NONE]['robots'] = $robot_array;
+      // Exclude the xmlsitemap.
+      $entity->xmlsitemap['status'] = 0;
+      $entity->xmlsitemap['status_override'] = 1;
+    }
+
+    // Set short description as meta description if source is advocacy.
+    if (isset($item['source_type']) && $item['source_type'] == 'Advocacy') {
+      $entity->body[LANGUAGE_NONE][0]['summary'] = $entity->field_short_decsription[LANGUAGE_NONE][0]['value'];
+    }
+
+    // Advocacy pages other than Article, Video Link should not be indexed by solr.
+    if (isset($item['source_type']) && $item['source_type'] === 'Advocacy' && isset($item['asset_type']) && !in_array($item['asset_type'], array('Article', 'Video Link'))) {
+      $entity->apachesolr_exclude_node_enabled = TRUE;
+    }
+    // Article and Video Link pages should not be included in sitemap.xml.
+    if (isset($item['asset_type']) && $item['asset_type'] !== 'Article' && $item['asset_type'] !== 'Video Link') {
+      $entity->xmlsitemap['status'] = 0;
+      $entity->xmlsitemap['status_override'] = 1;
+    }
+
+    $fusion_env = variable_get('fusion_env');
+    $is_prod = (!empty($fusion_env) && strpos($fusion_env, 'prod') !== FALSE) ? TRUE : FALSE;
+    // Check the environment.
+    if ($is_prod) {
+      // Check if production flag is set or not in newscred API.
+      if (empty($item['production']) || $item['production'] == 'False') {
+        // Skip saving this entity.
+        $entity->feeds_item->skip = TRUE;
+      }
+    }
+  }
+
+  // Delete feeds while import the delete feed api.
+  if ($source->importer->id === 'newscred_delete_feeds') {
+    // Skip saving all the nodes.
+    $entity->feeds_item->skip = TRUE;
+    // Find out the node id from the passed parameters.
+    $unique_id_val = $entity->feeds_item->guid;
+    // Get the node id from.
+    $result = db_select('feeds_item', 'f')
+      ->fields('f', array('entity_id'))
+      ->condition('guid', $unique_id_val, '=')
+      ->execute()
+      ->fetchField();
+    if (isset($result)) {
+      node_delete($result);
+    }
+  }
+}
+
+/**
+ * Implements hook_form_alter().
+ */
+function cancer_newscred_form_alter(&$form, &$form_state, $form_id) {
+  if ($form_id === 'views_exposed_form' && $form['#id'] === 'views-exposed-form-news-archive-news-archive') {
+
+    $bladder_cancer = taxonomy_get_term_by_name('Bladder');
+    $bladder_cancer_desc = _valid_menu_trail_alias(current($bladder_cancer));
+    $cancer_options[key($bladder_cancer)] = $bladder_cancer_desc['label'];
+
+    $breast_cancer = taxonomy_get_term_by_name('Breast');
+    $breast_cancer_desc = _valid_menu_trail_alias(current($breast_cancer));
+    $cancer_options[key($breast_cancer)] = $breast_cancer_desc['label'];
+
+    $lung_cancer = taxonomy_get_term_by_name('Lung');
+    $lung_cancer_desc = _valid_menu_trail_alias(current($lung_cancer));
+    $cancer_options[key($lung_cancer)] = $lung_cancer_desc['label'];
+
+    $multiple_myeloma_cancer = taxonomy_get_term_by_name('Multiple Myeloma');
+    $multiple_myeloma_cancer_desc = _valid_menu_trail_alias(current($multiple_myeloma_cancer));
+    $cancer_options[key($multiple_myeloma_cancer)] = $multiple_myeloma_cancer_desc['label'];
+
+    $nhl_cancer = taxonomy_get_term_by_name('NHL');
+    $nhl_cancer_desc = _valid_menu_trail_alias(current($nhl_cancer));
+    $cancer_options[key($nhl_cancer)] = $nhl_cancer_desc['label'];
+
+    $cll_cancer = taxonomy_get_term_by_name('--Chronic Lymphocytic Leukemia (CLL)/Small Lymphocytic Lymphoma (SLL)');
+    $cll_cancer_desc = _valid_menu_trail_alias(current($cll_cancer));
+    $cancer_options[key($cll_cancer)] = '- ' . $cll_cancer_desc['label'];
+
+    $dlbcl_cancer = taxonomy_get_term_by_name('--Diffuse Large B-Cell Lymphoma (DLBCL)');
+    $dlbcl_cancer_desc = _valid_menu_trail_alias(current($dlbcl_cancer));
+    $cancer_options[key($dlbcl_cancer)] = '- ' . $dlbcl_cancer_desc['label'];
+     
+    $fl_cancer = taxonomy_get_term_by_name('--Follicular Lymphoma (FL)');
+    $fl_cancer_desc = _valid_menu_trail_alias(current($fl_cancer));
+    $cancer_options[key($fl_cancer)] = '- ' . $fl_cancer_desc['label'];
+
+    $prostate_cancer = taxonomy_get_term_by_name('Prostate');
+    $prostate_cancer_desc = _valid_menu_trail_alias(current($prostate_cancer));
+    $cancer_options[key($prostate_cancer)] = $prostate_cancer_desc['label'];
+
+    $tumor_cancer = taxonomy_get_term_by_name('Tumor Agnostic');
+    $tumor_cancer_desc = _valid_menu_trail_alias(current($tumor_cancer));
+    $cancer_options[key($tumor_cancer)] = t('For ') . $tumor_cancer_desc['label'];
+
+    unset($form['cancer_type']['#options']);
+    $form['cancer_type']['#options'] = $cancer_options;
+
+    $understanding_your_dx = taxonomy_get_term_by_name('Recent Dx: Understanding Your Dx');
+    $understanding_your_dx_desc = _valid_menu_trail_alias(current($understanding_your_dx));
+    $recent_options[key($understanding_your_dx)] = $understanding_your_dx_desc['label'];
+
+    $chosing_healthcare = taxonomy_get_term_by_name('Recent Dx: Choosing Your Healthcare Team');
+    $chosing_healthcare_desc = _valid_menu_trail_alias(current($chosing_healthcare));
+    $recent_options[key($chosing_healthcare)] = $chosing_healthcare_desc['label'];
+
+    $coping = taxonomy_get_term_by_name('Recent Dx: Coping With Cancer');
+    $coping_desc = _valid_menu_trail_alias(current($coping));
+    $recent_options[key($coping)] = $coping_desc['label'];
+
+    $next_step = taxonomy_get_term_by_name('Recent Dx: Next Step Toward Treatment');
+    $next_step_desc = _valid_menu_trail_alias(current($next_step));
+    $recent_options[key($next_step)] = $next_step_desc['label'];
+
+    unset($form['recently_dianosed']['#options']);
+    $form['recently_dianosed']['#options'] = $recent_options;
+
+    $making_decision = taxonomy_get_term_by_name('Tx Decisions: Making a Decision');
+    $making_decision_desc = _valid_menu_trail_alias(current($making_decision));
+    $tx_options[key($making_decision)] = $making_decision_desc['label'];
+
+    $insurance_financial = taxonomy_get_term_by_name('Tx Decisions: Insurance and Financial');
+    $insurance_financial_desc = _valid_menu_trail_alias(current($insurance_financial));
+    $tx_options[key($insurance_financial)] = $insurance_financial_desc['label'];
+
+    $engaging_healthcare = taxonomy_get_term_by_name('Tx Decisions: Engaging Your Healthcare Team');
+    $engaging_healthcare_desc = _valid_menu_trail_alias(current($engaging_healthcare));
+    $tx_options[key($engaging_healthcare)] = $engaging_healthcare_desc['label'];
+
+    $what_expect = taxonomy_get_term_by_name('Tx Decisions: What to Expect');
+    $what_expect_desc = _valid_menu_trail_alias(current($what_expect));
+    $tx_options[key($what_expect)] = $what_expect_desc['label'];
+
+    $tx_not_option = taxonomy_get_term_by_name('Tx Decisions: When Tx Isn’t an Option');
+    $tx_not_option_desc = _valid_menu_trail_alias(current($tx_not_option));
+    $tx_options[key($tx_not_option)] = $tx_not_option_desc['label'];
+
+    $clinical_trials = taxonomy_get_term_by_name('Tx Decisions: Clinical Trials');
+    $clinical_trials_desc = _valid_menu_trail_alias(current($clinical_trials));
+    $tx_options[key($clinical_trials)] = $clinical_trials_desc['label'];
+
+    unset($form['treatment_decisions']['#options']);
+    $form['treatment_decisions']['#options'] = $tx_options;
+
+    $living_well = taxonomy_get_term_by_name('During Tx: Living Well');
+    $living_well_desc = _valid_menu_trail_alias(current($living_well));
+    $during_options[key($living_well)] = $living_well_desc['label'];
+
+    $caregiving = taxonomy_get_term_by_name('During Tx: Caregiving');
+    $caregiving_desc = _valid_menu_trail_alias(current($caregiving));
+    $during_options[key($caregiving)] = $caregiving_desc['label'];
+
+    $side_effects = taxonomy_get_term_by_name('During Tx: Side Effects of Tx');
+    $side_effects_desc = _valid_menu_trail_alias(current($side_effects));
+    $during_options[key($side_effects)] = $side_effects_desc['label'];
+
+    $working_heathcare = taxonomy_get_term_by_name('During Tx: Working With Your Healthcare Team');
+    $working_heathcare_desc = _valid_menu_trail_alias(current($working_heathcare));
+    $during_options[key($working_heathcare)] = $working_heathcare_desc['label'];
+
+    $cancer_support = taxonomy_get_term_by_name('During Tx: Cancer Support');
+    $cancer_support_desc = _valid_menu_trail_alias(current($cancer_support));
+    $during_options[key($cancer_support)] = $cancer_support_desc['label'];
+
+    unset($form['during_treament']['#options']);
+    $form['during_treament']['#options'] = $during_options;
+
+    $staying_healthy = taxonomy_get_term_by_name('Remission: Staying Healthy');
+    $staying_healthy_desc = _valid_menu_trail_alias(current($staying_healthy));
+    $remission_options[key($staying_healthy)] = $staying_healthy_desc['label'];
+
+    $follow_up_care = taxonomy_get_term_by_name('Remission: Follow-up Care');
+    $follow_up_care_desc = _valid_menu_trail_alias(current($follow_up_care));
+    $remission_options[key($follow_up_care)] = $follow_up_care_desc['label'];
+
+    $effect_treatment = taxonomy_get_term_by_name('Remission: Effects of Treatment');
+    $effect_treatment_desc = _valid_menu_trail_alias(current($effect_treatment));
+    $remission_options[key($effect_treatment)] = $effect_treatment_desc['label'];
+
+    $life_after_cancer = taxonomy_get_term_by_name('Remission: Life After Cancer');
+    $life_after_cancer_desc = _valid_menu_trail_alias(current($life_after_cancer));
+    $remission_options[key($life_after_cancer)] = $life_after_cancer_desc['label'];
+
+    unset($form['remission']['#options']);
+    $form['remission']['#options'] = $remission_options;
+
+    $cancer_returns = taxonomy_get_term_by_name('Recurrence: If Cancer Returns');
+    $cancer_returns_desc = _valid_menu_trail_alias(current($cancer_returns));
+    $recurrance_options[key($cancer_returns)] = $cancer_returns_desc['label'];
+
+    $recurrent_tx_option = taxonomy_get_term_by_name('Recurrence: Recurrent Tx Options');
+    $recurrent_tx_option_desc = _valid_menu_trail_alias(current($recurrent_tx_option));
+    $recurrance_options[key($recurrent_tx_option)] = $recurrent_tx_option_desc['label'];
+
+    $re_engage = taxonomy_get_term_by_name('Recurrence: Re-engaging Your Healthcare Team');
+    $re_engage_desc = _valid_menu_trail_alias(current($re_engage));
+    $recurrance_options[key($re_engage)] = $re_engage_desc['label'];
+
+    $recurrance_clinical = taxonomy_get_term_by_name('Recurrence: Clinical Trials');
+    $recurrance_clinical_desc = _valid_menu_trail_alias(current($recurrance_clinical));
+    $recurrance_options[key($recurrance_clinical)] = $recurrance_clinical_desc['label'];
+
+    $end_to_life = taxonomy_get_term_by_name('Recurrence: End-of-Life Care');
+    $end_to_life_desc = _valid_menu_trail_alias(current($end_to_life));
+    $recurrance_options[key($end_to_life)] = $end_to_life_desc['label'];
+
+    unset($form['facing_recurrence']['#options']);
+    $form['facing_recurrence']['#options'] = $recurrance_options;
+  }
+}
+
+/**
+ * Implements hook_views_pre_view().
+ */
+function cancer_newscred_views_pre_view(&$view, &$display_id, &$args) {
+  if ($view->name == 'news_archive') {
+    // Get current filters.
+    $current_filters = $view->display_handler->get_option('filters');
+    // Cancer type filter array.
+
+    $cancer_options[key(taxonomy_get_term_by_name('Bladder'))] = key(taxonomy_get_term_by_name('Bladder'));
+    $cancer_options[key(taxonomy_get_term_by_name('Breast'))] = key(taxonomy_get_term_by_name('Breast'));
+    $cancer_options[key(taxonomy_get_term_by_name('Lung'))] = key(taxonomy_get_term_by_name('Lung'));
+    $cancer_options[key(taxonomy_get_term_by_name('Multiple Myeloma'))] = key(taxonomy_get_term_by_name('Multiple Myeloma'));
+    $cancer_options[key(taxonomy_get_term_by_name('NHL'))] = key(taxonomy_get_term_by_name('NHL'));
+    $cancer_options[key(taxonomy_get_term_by_name('CLL'))] = key(taxonomy_get_term_by_name('CLL'));
+    $cancer_options[key(taxonomy_get_term_by_name('DLBCL'))] = key(taxonomy_get_term_by_name('DLBCL'));
+    $cancer_options[key(taxonomy_get_term_by_name('FL'))] = key(taxonomy_get_term_by_name('FL'));
+    $cancer_options[key(taxonomy_get_term_by_name('Prostate'))] = key(taxonomy_get_term_by_name('Prostate'));
+    $cancer_options[key(taxonomy_get_term_by_name('Tumor Agnostic'))] = key(taxonomy_get_term_by_name('Tumor Agnostic'));
+    $current_filters['tid']['value'] = $cancer_options;
+
+    // Recently diagnosed options.
+    $recent_options[key(taxonomy_get_term_by_name('Recent Dx: Understanding Your Dx'))] = key(taxonomy_get_term_by_name('Recent Dx: Understanding Your Dx'));
+    $recent_options[key(taxonomy_get_term_by_name('Recent Dx: Choosing Your Healthcare Team'))] = key(taxonomy_get_term_by_name('Recent Dx: Choosing Your Healthcare Team'));
+    $recent_options[key(taxonomy_get_term_by_name('Recent Dx: Coping With Cancer'))] = key(taxonomy_get_term_by_name('Recent Dx: Coping With Cancer'));
+    $recent_options[key(taxonomy_get_term_by_name('Recent Dx: Next Step Toward Treatment'))] = key(taxonomy_get_term_by_name('Recent Dx: Next Step Toward Treatment'));
+    $current_filters['tid_1']['value'] = $recent_options;
+
+    $tx_options[key(taxonomy_get_term_by_name('Tx Decisions: Making a Decision'))] = key(taxonomy_get_term_by_name('Tx Decisions: Making a Decision'));
+    $tx_options[key(taxonomy_get_term_by_name('Tx Decisions: Insurance and Financial'))] = key(taxonomy_get_term_by_name('Tx Decisions: Insurance and Financial'));
+    $tx_options[key(taxonomy_get_term_by_name('Tx Decisions: Engaging Your Healthcare Team'))] = key(taxonomy_get_term_by_name('Tx Decisions: Engaging Your Healthcare Team'));
+    $tx_options[key(taxonomy_get_term_by_name('Tx Decisions: What to Expect'))] = key(taxonomy_get_term_by_name('Tx Decisions: What to Expect'));
+    $tx_options[key(taxonomy_get_term_by_name('Tx Decisions: When Tx Isn’t an Option'))] = key(taxonomy_get_term_by_name('Tx Decisions: When Tx Isn’t an Option'));
+    $tx_options[key(taxonomy_get_term_by_name('Tx Decisions: Clinical Trials'))] = key(taxonomy_get_term_by_name('Tx Decisions: Clinical Trials'));
+    $current_filters['tid_2']['value'] = $tx_options;
+
+    $during_options[key(taxonomy_get_term_by_name('During Tx: Living Well'))] = key(taxonomy_get_term_by_name('During Tx: Living Well'));
+    $during_options[key(taxonomy_get_term_by_name('During Tx: Caregiving'))] = key(taxonomy_get_term_by_name('During Tx: Caregiving'));
+    $during_options[key(taxonomy_get_term_by_name('During Tx: Side Effects of Tx'))] = key(taxonomy_get_term_by_name('During Tx: Side Effects of Tx'));
+    $during_options[key(taxonomy_get_term_by_name('During Tx: Working With Your Healthcare Team'))] = key(taxonomy_get_term_by_name('During Tx: Working With Your Healthcare Team'));
+    $during_options[key(taxonomy_get_term_by_name('During Tx: Cancer Support'))] = key(taxonomy_get_term_by_name('During Tx: Cancer Support'));
+    $current_filters['tid_3']['value'] = $during_options;
+
+    $remission_options[key(taxonomy_get_term_by_name('Remission: Staying Healthy'))] = key(taxonomy_get_term_by_name('Remission: Staying Healthy'));
+    $remission_options[key(taxonomy_get_term_by_name('Remission: Follow-up Care'))] = key(taxonomy_get_term_by_name('Remission: Follow-up Care'));
+    $remission_options[key(taxonomy_get_term_by_name('Remission: Effects of Treatment'))] = key(taxonomy_get_term_by_name('Remission: Effects of Treatment'));
+    $remission_options[key(taxonomy_get_term_by_name('Remission: Life After Cancer'))] = key(taxonomy_get_term_by_name('Remission: Life After Cancer'));
+    $current_filters['tid_4']['value'] = $remission_options;
+
+    $recurrance_options[key(taxonomy_get_term_by_name('Recurrence: If Cancer Returns'))] = key(taxonomy_get_term_by_name('Recurrence: If Cancer Returns'));
+    $recurrance_options[key(taxonomy_get_term_by_name('Recurrence: Recurrent Tx Options'))] = key(taxonomy_get_term_by_name('Recurrence: Recurrent Tx Options'));
+    $recurrance_options[key(taxonomy_get_term_by_name('Recurrence: Re-engaging Your Healthcare Team'))] = key(taxonomy_get_term_by_name('Recurrence: Re-engaging Your Healthcare Team'));
+    $recurrance_options[key(taxonomy_get_term_by_name('Recurrence: Clinical Trials'))] = key(taxonomy_get_term_by_name('Recurrence: Clinical Trials'));
+    $recurrance_options[key(taxonomy_get_term_by_name('Recurrence: End-of-Life Care'))] = key(taxonomy_get_term_by_name('Recurrence: End-of-Life Care'));
+    $current_filters['tid_5']['value'] = $recurrance_options;
+
+    // Set new filters.
+    $view->display_handler->override_option('filters', $current_filters);
+
+    $url_para = drupal_get_query_parameters();
+    if (isset($url_para) && !empty($url_para)) {
+      $view->get_exposed_input();
+      if (count($view->exposed_input) <= 1) {
+        $ref_url = check_plain(filter_xss($url_para['ref']));
+        $node_path = drupal_lookup_path("source", ltrim($ref_url, '/'));
+        // Node object based on ref parameter of query string.
+        $node = menu_get_object("node", 1, $node_path);
+        if ($node) {
+
+          // Get filter options.
+          $filters = $view->display_handler->get_option('filters');
+          $cancer_options = $filters['tid']['value'];
+          $recent_options = $filters['tid_1']['value'];
+          $treatment_options = $filters['tid_2']['value'];
+          $during_options = $filters['tid_3']['value'];
+          $remission_options = $filters['tid_4']['value'];
+          $facing_options = $filters['tid_5']['value'];
+          // Make appropriate array to pass in exposed filters.
+          foreach ($node->field_general_tags[LANGUAGE_NONE] as $value) {
+            if (in_array($value['tid'], $cancer_options)) {
+
+              $cancer_filter[] = $value['tid'];
+              if(taxonomy_get_parents($value['tid'])) {                
+              }
+              $cancer_filter[] = key(taxonomy_get_term_by_name('Tumor Agnostic'));
+            }
+            elseif (in_array($value['tid'], $recent_options)) {
+              $recent_filter[] = $value['tid'];
+            }
+            elseif (in_array($value['tid'], $treatment_options)) {
+              $treatment_filter[] = $value['tid'];
+            }
+            elseif (in_array($value['tid'], $during_options)) {
+              $during_filter[] = $value['tid'];
+            }
+            elseif (in_array($value['tid'], $remission_options)) {
+              $remission_filter[] = $value['tid'];
+            }
+            elseif (in_array($value['tid'], $facing_options)) {
+              $facing_filter[] = $value['tid'];
+            }
+          }
+
+          // Pass exposed filters values based on taxonomies of reference node.
+          $view->get_exposed_input();
+          if (!isset($view->exposed_input['cancer_type']) && isset($cancer_filter)) {
+            $view->exposed_input['cancer_type'] = $cancer_filter;
+          }
+          if (!isset($view->exposed_input['recently_dianosed']) && isset($recent_filter)) {
+            $view->exposed_input['recently_dianosed'] = $recent_filter;
+          }
+          if (!isset($view->exposed_input['treatment_decisions']) && isset($treatment_filter)) {
+            $view->exposed_input['treatment_decisions'] = $treatment_filter;
+          }
+          if (!isset($view->exposed_input['during_treament']) && isset($during_filter)) {
+            $view->exposed_input['during_treament'] = $during_filter;
+          }
+          if (!isset($view->exposed_input['remission']) && isset($remission_filter)) {
+            $view->exposed_input['remission'] = $remission_filter;
+          }
+          if (!isset($view->exposed_input['facing_recurrence']) && isset($facing_filter)) {
+            $view->exposed_input['facing_recurrence'] = $facing_filter;
+          }
+          $view->execute();
+        }
+      }
+    }
+  }
+  // User Registration strp 2 Interest type tiles display.
+  if ($view->name == 'user_interest_tiles') {
+    global $user;
+    if (user_is_logged_in() && janrain_is_logged_in()) {
+      $reg_interests = token_replace('[current-user:janrain-profile:siteSpecific:www_cancer_com:www_cancer_com_topics]', array('user' => $user));
+      if ($reg_interests) {
+        $reg_interests_arr = explode(',', $reg_interests);
+        foreach ($reg_interests_arr as $key => $value) {
+          $interest_type = CANCER_USER_REGISTRATION_TOPICS[$value];
+          $interest_type_tids[] = key(taxonomy_get_term_by_name($interest_type));
+        }
+        $args[] = implode(',', $interest_type_tids);
+      }
+    }
+  }
+}

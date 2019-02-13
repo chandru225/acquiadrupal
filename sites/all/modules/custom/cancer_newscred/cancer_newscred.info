@@ -1,0 +1,5 @@
+name = cancer_newscred
+description = Defines hooks functions required for articles.
+core = 7.x
+package = Cancer
+version = 7.x-1.0

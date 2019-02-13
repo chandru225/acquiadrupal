@@ -1,0 +1,40 @@
+name = www_cancer_com
+description = Controls all www_cancer_com dependencies
+core = 7.x
+package = Cancer
+version = 7.x-1.0
+project = Cancer
+
+;jjfusion modules
+dependencies[] = fus_api_tokens
+dependencies[] = fus_extlink_modal
+dependencies[] = fus_personalize
+dependencies[] = jcr_cdn
+dependencies[] = jcr_menu
+dependencies[] = jjfusion_carousel
+dependencies[] = jjfusion_video
+dependencies[] = jjfusion_wysiwyg
+
+;site features
+dependencies[] = cancer_core
+dependencies[] = cancer_context
+dependencies[] = cancer_content_types
+dependencies[] = cancer_feeds
+dependencies[] = cancer_eloqua_forms
+dependencies[] = cancer_forms
+dependencies[] = cancer_janrain
+dependencies[] = cancer_lift
+dependencies[] = cancer_overrides
+dependencies[] = cancer_panel
+dependencies[] = cancer_search
+dependencies[] = cancer_services
+dependencies[] = cancer_views
+
+;site custom
+dependencies[] = cancer_newscred
+dependencies[] = cancer_resources
+dependencies[] = cancer_user
+
+;site contrib
+dependencies[] = prevent_js_alerts
+dependencies[] = menu_block

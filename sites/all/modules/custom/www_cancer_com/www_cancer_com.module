@@ -1,0 +1,412 @@
+<?php
+
+/**
+ * @file
+ * Code for the www_cancer_com.
+ */
+
+include_once 'cancer.constants.inc';
+include_once 'cancer.search.inc';
+
+/**
+ * Implements hook_init().
+ */
+function www_cancer_com_init() {
+  // Set menu active trail.
+  set_cancer_site_menu_trail();
+}
+
+/**
+ * Implements hook_preprocess_page().
+ */
+function cancer_user_preprocess_page(&$vars) {
+  // Case: detect user home page.
+  if (drupal_is_front_page() || $vars['is_front']) {
+    cancer_user_front_page();
+  }
+}
+
+/**
+ * Implements hook_menu_block_blocks().
+ */
+function www_cancer_com_menu_block_blocks() {
+  // The array key is the block delta used by menu block.
+  return [
+    'www_cancer_com-1' => [
+      'parent' => 'jcr-menu-main-menu:0',
+      'title_link' => 0,
+      'admin_title' => 'Left Menu',
+      'level' => 3,
+      'follow' => '0',
+      'depth' => 0,
+      'expanded' => 0,
+      'sort' => 0,
+    ],
+    'www_cancer_com-2' => [
+      'parent' => 'jcr-menu-utility-menu:0',
+      'title_link' => 0,
+      'admin_title' => 'Left Utility Menu',
+      'level' => 2,
+      'follow' => '0',
+      'depth' => 0,
+      'expanded' => 0,
+      'sort' => 0,
+    ],
+    'www_cancer_com-3' => [
+      'parent' => 'jcr-menu-main-menu:0',
+      'title_link' => 0,
+      'admin_title' => 'Main Menu Parent Elements Level 1',
+      'level' => 1,
+      'follow' => '0',
+      'depth' => 1,
+      'expanded' => 0,
+      'sort' => 0,
+    ],
+    'www_cancer_com-4' => [
+      'parent' => 'jcr-menu-main-menu:0',
+      'title_link' => 0,
+      'admin_title' => 'Main Menu Child Elements Level 2',
+      'level' => 2,
+      'follow' => '0',
+      'depth' => 0,
+      'expanded' => 0,
+      'sort' => 0,
+    ],
+  ];
+}
+
+/**
+ * Implements hook_views_query_alter().
+ */
+function www_cancer_com_views_query_alter(&$view, &$query) {
+  $original_source_id = key(taxonomy_get_term_by_name('Original'));
+  $licensed_source_id = key(taxonomy_get_term_by_name('Licensed'));
+  $advocacy_source_id = key(taxonomy_get_term_by_name('Advocacy'));
+
+  $doc_link_id = key(taxonomy_get_term_by_name('Doc Link'));
+  $article_id = key(taxonomy_get_term_by_name('Article'));
+  $page_link_id = key(taxonomy_get_term_by_name('Page Link'));
+  $video_link_id = key(taxonomy_get_term_by_name('Video Link'));
+
+  $tumor_cancer_id = key(taxonomy_get_term_by_name('Tumor Agnostic'));
+
+  // Pass dynamic exposed filter.
+  $feature = key(taxonomy_get_term_by_name('Feature this content'));
+  $feature_carousel_images = key(taxonomy_get_term_by_name('Carousel images'));
+  $related_carousel_images = key(taxonomy_get_term_by_name('related_carousel '));
+  // Pass dynamic exposed filter.
+  if ($view->name === 'latest_news' || $view->name === 'related_news' || $view->name === 'news_archive') {
+    $query->where[1]['conditions'][2]['value'] = $licensed_source_id;
+    $query->where[1]['conditions'][3]['value'] = $article_id;
+  }
+
+  if ($view->name === 'cancer_information' || $view->name === 'more_on_this_topic') {
+    $query->where[1]['conditions'][2]['value'] = [
+      $original_source_id => $original_source_id,
+      $advocacy_source_id => $advocacy_source_id,
+    ];
+    $query->where[1]['conditions'][3]['value'] = [
+      $article_id => $article_id,
+      $video_link_id => $video_link_id,
+    ];
+  }
+
+  if ($view->name === 'cancer_information' || $view->name === 'latest_news' || $view->name === 'additional_links') {
+
+    $cancer_array_field = key($query->where[0]['conditions'][0]['value']);
+    $current_cancer = current($query->where[0]['conditions'][0]['value']);
+    $query->where[0]['conditions'][0]['value'][$cancer_array_field] = $current_cancer;
+    $parent_cancer = taxonomy_get_parents($current_cancer[0]);
+    $parent_cancer_id = '';
+    // Check if current cancer has NHL as parent.
+    foreach ($parent_cancer as $parent) {
+      if ($parent->name == 'NHL') {
+        $parent_cancer_id = $parent->tid;
+      }
+    }
+    array_push($current_cancer, $parent_cancer_id);
+    $query->where[0]['conditions'][0]['value'][$cancer_array_field] = $current_cancer;
+  }
+
+  if ($view->name === 'more_on_this_topic') {
+    $query->where[1]['conditions'][5]['value'] = $tumor_cancer_id;
+  }
+
+  if ($view->name === 'latest_news' || $view->name === 'additional_links' || $view->name === 'related_news') {
+    $cancer_array_field = key($query->where[0]['conditions'][0]['value']);
+    $current_cancer = current($query->where[0]['conditions'][0]['value']);
+    array_push($current_cancer, $tumor_cancer_id);
+    $query->where[0]['conditions'][0]['value'][$cancer_array_field] = $current_cancer;
+  }
+
+  if ($view->name === 'additional_links') {
+    $query->where[1]['conditions'][2]['value'] = $advocacy_source_id;
+    $query->where[1]['conditions'][3]['value'] = [
+      $doc_link_id => $doc_link_id,
+      $page_link_id => $page_link_id,
+    ];
+  }
+
+  // Cancer Carousel.
+  if ($view->name === 'cancer_carousel' && $view->current_display === 'featured_carousel' || $view->name === 'cancer_carousel' && $view->current_display === 'treatment_journey_carousel') {
+    $query->where[1]['conditions'][2]['value'] = [
+      $original_source_id => $original_source_id,
+      $advocacy_source_id => $advocacy_source_id,
+      $licensed_source_id => $licensed_source_id,
+    ];
+    $query->where[1]['conditions'][3]['value'] = $feature;
+    $query->where[1]['conditions'][4]['value'] = $article_id;
+  }
+
+  // Featured Carousel.
+  if ($view->name === 'cancer_carousel' && $view->current_display === 'featured_carousel') {
+
+    $cancer_array_field = key($query->where[0]['conditions'][0]['value']);
+    $current_cancer = current($query->where[0]['conditions'][0]['value']);
+    $parent_cancer = taxonomy_get_parents($current_cancer);
+
+    // Check if current cancer has NHL as parent.
+    foreach ($parent_cancer as $parent) {
+      if ($parent->name == 'NHL') {
+        $parent_cancer_id = $parent->tid;
+        // Change views query conditon from = to IN.
+        $query->where[0]['conditions'][0]['field'] = 'field_data_field_newscred_cancer_type.field_newscred_cancer_type_tid IN(:field_data_field_newscred_cancer_type_field_newscred_cancer_type_tid)';
+      }
+    }
+
+    if (!is_array($current_cancer)) {
+      $current_cancer = [current($query->where[0]['conditions'][0]['value'])];
+    }
+
+    // Add NHL cancer to the current cancer type filter.
+    if (!empty($parent_cancer_id)) {
+      array_push($current_cancer, $parent_cancer_id);
+    }
+    // Add parent term id to contextual filter if parent is NHL.
+    $query->where[0]['conditions'][0]['value'][$cancer_array_field] = $current_cancer;
+  }
+
+  // Related Carousel.
+  if ($view->name === 'cancer_carousel' && $view->current_display === 'related_carousel') {
+    $query->where[1]['conditions'][2]['value'] = [
+      $original_source_id => $original_source_id,
+      $advocacy_source_id => $advocacy_source_id,
+      $licensed_source_id => $licensed_source_id,
+    ];
+    $query->where[1]['conditions'][3]['value'] = $article_id;
+
+    $cancer_array_field = key($query->where[0]['conditions'][0]['value']);
+    $current_cancer = current($query->where[0]['conditions'][0]['value']);
+    if (!is_array($current_cancer)) {
+      $current_cancer = [current($query->where[0]['conditions'][0]['value'])];
+    }
+    array_push($current_cancer, $tumor_cancer_id);
+    $query->where[0]['conditions'][0]['value'][$cancer_array_field] = $current_cancer;
+  }
+  // Featured Carousel images.
+  if ($view->name === 'cancer_carousel' && $view->current_display === 'carousel_images') {
+    $query->where[1]['conditions'][2]['value'] = $feature_carousel_images;
+  }
+  // Related Carousel images.
+  if ($view->name === 'cancer_carousel' && $view->current_display === 'related_carousel_images') {
+    $query->where[1]['conditions'][2]['value'] = $related_carousel_images;
+  }
+
+  // User registration interest tiles.
+  if ($view->name === 'user_interest_tiles' && $view->current_display === 'user_interest_tiles') {
+    $reg_tiles = key(taxonomy_get_term_by_name('cancer_registration_interest_tiles'));
+    $query->where[1]['conditions'][2]['value'] = $reg_tiles;
+  }
+}
+
+/**
+ * Implements hook_clientside_validation_webform_alter().
+ */
+function www_cancer_com_clientside_validation_webform_alter($form, $form_state, &$js_rules) {
+  // Editprofile form.
+  $js_rules['submitted[address_1]']['messages']['required'] = t('Enter a valid address');
+  $js_rules['submitted[city]']['messages']['required'] = t('Enter a city');
+  $js_rules['submitted[state]']['messages']['required'] = t('Select a state');
+  $js_rules['submitted[zipcode]']['messages']['required'] = t('Enter a Zip');
+
+  // Survivorship Guide.
+  $js_rules['submitted[sg_cancertype]']['messages']['required'] = t('Enter diagnosis');
+  $js_rules['submitted[sg_stage]']['messages']['required'] = t('Select stage');
+  $js_rules['submitted[sg_treatment]']['messages']['required'] = t('Select treatment');
+  $js_rules['submitted[sg_firstname]']['messages']['required'] = t('Enter your first name');
+  $js_rules['submitted[sg_lastname]']['messages']['required'] = t('Enter your last name');
+  $js_rules['submitted[sg_email_address]']['messages']['required'] = t('Enter your email address');
+  $js_rules['submitted[sg_address1]']['messages']['required'] = t('Enter your mailing address');
+  $js_rules['submitted[sg_city]']['messages']['required'] = t('Enter your city');
+  $js_rules['submitted[sg_state]']['messages']['required'] = t('Select your state');
+  $js_rules['submitted[sg_zip]']['messages']['required'] = t('Enter a valid ZIP code');
+  $js_rules['submitted[sg_gender]']['messages']['required'] = t('Select gender');
+  $js_rules['submitted[sg_phone]']['messages']['required'] = t('Enter a valid phone number');
+  $js_rules['submitted[sg_dob][year]']['messages']['required'] = t('Enter your date of birth');
+  $js_rules['_groups'] = [
+    'dob' => 'submitted[sg_dob][month] submitted[sg_dob][day] submitted[sg_dob][year]',
+  ];
+}
+
+/**
+ * Implements hook_preprocess_views_view().
+ */
+function www_cancer_com_preprocess_views_view(&$variables) {
+  $view = $variables['view'];
+
+  if ($view->name === 'cancer_information') {
+    $args = $view->args[0];
+    $cancer_id = strtok($args, ',');
+    $cancer_data = taxonomy_term_load($cancer_id);
+    $cancer_name = $cancer_data->name;
+
+    if ($view->result) {
+      $view_title = str_replace('--', ' ', $cancer_name) . " " . $view->get_title();
+      $variables['header'] = '<h3 class="cancer-info">' . $view_title . '<h3>';
+    }
+  }
+
+  if ($view->name === 'cancer_carousel') {
+    libraries_load('owl-carousel2');
+    $module_path = drupal_get_path('module', 'jjfusion_carousel');
+    drupal_add_css($module_path . '/css/jjfusion_carousel.css');
+    if ($view->name === 'cancer_carousel' && $view->current_display === 'featured_carousel') {
+      $view_display = 'carousel_images';
+    }
+    elseif ($view->name === 'cancer_carousel' && $view->current_display === 'related_carousel' || $view->name === 'cancer_carousel' && $view->current_display === 'treatment_journey_carousel') {
+      $view_display = 'related_carousel_images';
+    }
+    $variables['carousel_images'] = _get_carousel_images($view_display);
+    $variables['carousel_links'] = $view->result;
+  }
+}
+
+/**
+ * Function to get attached images for cancer carousel.
+ */
+function _get_carousel_images($view_display) {
+  $view = views_get_view('cancer_carousel');
+  $view->set_display($view_display);
+  $view->execute();
+  $results = $view->result;
+  $carousel_images = [];
+  foreach ($results as $result) {
+    $carousel_images['desktop'][] = isset($result->field_field_resource_file[0]['raw']['uri']) ? $result->field_field_resource_file[0]['raw']['uri'] : '';
+    $carousel_images['mobile'][] = isset($result->field_field_resource_image[0]['raw']['uri']) ? $result->field_field_resource_image[0]['raw']['uri'] : '';
+  }
+  return $carousel_images;
+}
+
+/**
+ * Set menu path for the site.
+ *
+ * First check for the requested page an active trail is already set for the
+ * main menu of the site. If not proceed to set one.
+ *
+ * This is set for pages which are not present in the main menu.
+ * For newscred pages, it is determined from the category the page is assigned
+ * to. CancerType & CancerInterests are the fields used for this.
+ *
+ * For other pages, check if cancertype cookie is set, if so use that,
+ * else use the default cancertype page.
+ */
+function set_cancer_site_menu_trail() {
+  // Fetch the current menu trail for the loaded page.
+  $menu_trail = menu_get_active_trail();
+  $site_trail_set = FALSE;
+
+  // Check if for the current page site menu is present in trail.
+  foreach ($menu_trail as $item) {
+    if (isset($item['menu_name']) && $item['menu_name'] == WWW_CANCER_COM_MAIN_MENU) {
+      $site_trail_set = TRUE;
+      break;
+    }
+  }
+
+  // Site menu is not present in trail.
+  // Set the appropriate item as menu path.
+  if (!$site_trail_set) {
+    $node = menu_get_object();
+    if ($node && isset($node->type) && $node->type === 'newscred') {
+      $node_wrapper = entity_metadata_wrapper('node', $node);
+      // Get parameters from current url.
+      $url_para = drupal_get_query_parameters();
+      $ref_page = (!empty($url_para['ref'])) ? check_plain(filter_xss(ltrim($url_para['ref'], '/'))) : '';
+      if (!empty($ref_page) && drupal_lookup_path('source', $ref_page)) {
+        // Set the path based on reference from url.
+        $trail_path = $ref_page;
+      }
+      else {
+        $cancer_arr = $node_wrapper->field_newscred_cancer_type->value();
+        $journey_arr = $node_wrapper->field_newscred_journey_step->value();
+        $interests_arr = $node_wrapper->field_newscred_interests->value();
+
+        // Set URL trail path.
+        foreach ($cancer_arr as $cancer_value) {
+          foreach ($journey_arr as $journey_value) {
+            foreach ($interests_arr as $interest_value) {
+              // Cancer Type.
+              $cancer_type = _valid_menu_trail_alias($cancer_value);
+              $cancer_name = check_plain(filter_xss($cancer_type['url']));
+
+              // Journey Steps.
+              $journey_type = _valid_menu_trail_alias($journey_value, $cancer_name);
+              $journey_name = check_plain(filter_xss($journey_type['url']));
+
+              // Interest Steps.
+              $interest_type = _valid_menu_trail_alias($interest_value, $cancer_name);
+              $interests_name = check_plain(filter_xss($interest_type['url']));
+
+              $url_comb_alias = trim($cancer_name) . '/' . trim($journey_name) . '/' . trim($interests_name);
+              if (drupal_lookup_path('source', $url_comb_alias)) {
+                $trail_path = $url_comb_alias;
+                break;
+              }
+              else {
+                $url_comb_alias = trim($cancer_name) . '/' . trim($journey_name);
+                $trail_path = $url_comb_alias;
+              }
+            }
+          }
+        }
+      }
+    }
+    elseif (!empty($_COOKIE['cancertype'])) {
+      $trail_path = $_COOKIE['cancertype'];
+    }
+    else {
+      $trail_path = WWW_CANCER_COM_CANCERTYPE_DEFAULT_URL;
+    }
+    // Set the menu path for the current page.
+    menu_tree_set_path(WWW_CANCER_COM_MAIN_MENU, drupal_get_normal_path($trail_path));
+  }
+}
+
+/**
+ * Function to get url based on the taxonomy term description.
+ */
+function _valid_menu_trail_alias($term, $cancer_type = NULL) {
+  $term_name = $term->name;
+  $description = json_decode($term->description, TRUE);
+  $url = $description['urls'];
+  if (is_array($url) && !empty($cancer_type)) {
+    $url = $url[$cancer_type];
+  }
+  $label = $description['label'] ? $description['label'] : $term_name;
+  $search_label = $description['search-label'] ? $description['search-label'] : $term_name;
+  $result['url'] = $url;
+  $result['label'] = $label;
+  $result['search-label'] = $search_label;
+  return $result;
+}
+
+/**
+ * Implements hook_block_info_alter().
+ */
+function www_cancer_com_block_info_alter(&$blocks, $theme, $code_blocks) {
+  // Disable block cache for the header callout.
+  // This was set to make the main menu functionality work without issues.
+  if (isset($blocks['nodeblock']['9575f6263cd3413592188d6b3949775f'])) {
+    $blocks['nodeblock']['9575f6263cd3413592188d6b3949775f']['cache'] = DRUPAL_NO_CACHE;
+  }
+}

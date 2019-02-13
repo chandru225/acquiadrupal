@@ -1,0 +1,55 @@
+<?php
+
+/**
+ * @file
+ * Installation code for the www_cancer_com.
+ */
+
+/**
+ * Implements hook_install().
+ */
+function www_cancer_com_install() {
+  // Set the default theme.
+  theme_enable(array('cancer'));
+  // Disable the old default theme.
+  theme_disable(array('bartik'));
+}
+
+/**
+ * Enable prevent_js_alerts, autologout module.
+ */
+function www_cancer_com_update_7001() {
+  $modules = [
+    'prevent_js_alerts',
+    'autologout',
+  ];
+  module_enable($modules);
+}
+
+/**
+ * Enable fus_personalize module for content_hub.
+ *
+ * Disable cancer_personalization module.
+ */
+function www_cancer_com_update_7002() {
+  // Enable fus_personalize module.
+  module_enable(['fus_personalize']);
+
+  // Disable cancer_personalization module.
+  module_disable(['cancer_personalization']);
+}
+
+/**
+ * Enable jcr_cdn module for clearing cache.
+ */
+function www_cancer_com_update_7003(&$sandbox) {
+  // Enable jcr_cdn module.
+  module_enable(['jcr_cdn']);
+}
+
+/**
+ * Disable cancer_progressive module.
+ */
+function www_cancer_com_update_7004() {
+  module_disable(['cancer_progressive']);
+}
